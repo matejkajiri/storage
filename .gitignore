@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.env
+*.log
+dist/
+build/
+*.egg-info/
+
+# IntelliJ Idea - PyCharm
+.idea/
