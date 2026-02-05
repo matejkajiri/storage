@@ -16,7 +16,7 @@ class S3(Storage):
             access_key: str,
             secret_key: str,
             host_bucket: str,
-            collection: str,
+            collection: str = None,
             service_name: str = "s3",
             logger: logging.Logger | None = None,
             **kwargs,
@@ -75,3 +75,4 @@ class S3(Storage):
             return False
 
         return True
+
