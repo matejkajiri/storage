@@ -16,8 +16,9 @@ class Storage(ABC):
 
     def __init__(self, collection: str, logger: logging.Logger | None = None, *args, **kwargs):
         if not collection:
-            raise ValueError("Collection must be specified at construction")
-        self._collection = collection.strip("/")
+            self._collection = None
+        else:
+            self._collection = collection.strip("/")
         self._logger = logger or logging.getLogger(__name__)
 
     # ---------------- PATH HANDLING ----------------
@@ -127,3 +128,4 @@ class Storage(ABC):
                 content = json.load(f)
             if content.get("uuid") == lock_id:
                 self.delete(lock_file_name)
+
