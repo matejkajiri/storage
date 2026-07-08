@@ -18,7 +18,7 @@ pip install git+https://github.com/matejkajiri/storage.git
 ### Import
 
 ```python
-from storage import Storage, S3, StorageFileNotFoundError, StorageCannotAcquireLock
+from storage import *
 ```
 
 ### Using S3 Storage
@@ -28,8 +28,8 @@ from storage import Storage, S3, StorageFileNotFoundError, StorageCannotAcquireL
 ```python
 s3 = S3(
     s3_host="https://my-s3-endpoint",
-    access_key="ACCESS_KEY",
-    secret_key="SECRET_KEY",
+    access_key="ACCESS_KEY", # Can be ommited if using .env variables: "AWS_ACCESS_KEY_ID"
+    secret_key="SECRET_KEY", # Can be ommited if using .env variables: "AWS_SECRET_KEY_ID"
     host_bucket="my-bucket",
     collection="my-collection"
 )
