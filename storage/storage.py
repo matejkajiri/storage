@@ -114,13 +114,21 @@ class Storage(ABC):
 
                 except StorageFileAlreadyExists:
                     # Try again if failed in case of concurrent lock acquisition
-                    if attempt < max_retries - 1:
-                        delay = 0.1 * (attempt + 1) + random.random()
-                        time.sleep(delay)
+
+                    if self._is_lock_expired(lock_file_name, ttl):
+                        # Lock expired
+                        self._logger.info(f"Lock expired for {remote_file_path}, deleting and retrying.")
+                        self.delete(lock_file_name)
                         continue
 
                     else:
-                        raise
+                        # Lock is still valid -> wait and try again
+                        if attempt < max_retries - 1:
+                            delay = 0.1 * (attempt + 1) + random.random()
+                            time.sleep(delay)
+                            continue
+                        else:
+                            raise
 
                 except Exception as e:
                     # Other exceptions (network issues, etc.) should be propagated
@@ -131,6 +139,29 @@ class Storage(ABC):
                     raise
 
         raise StorageCannotAcquireLock(file=lock_file_name)
+
+    def _is_lock_expired(self, lock_file_name: str, default_ttl: int) -> bool:
+        try:
+            with self._temp_path(".json") as verify_path:
+                self.download(lock_file_name, verify_path)
+                with open(verify_path, encoding="utf-8") as f:
+                    content = json.load(f)
+
+                timestamp = content.get("timestamp", 0)
+                ttl = content.get("ttl", default_ttl)
+
+                if (time.time() - timestamp) > ttl:
+                    return True
+                return False
+
+        except StorageFileNotFoundError:
+            # File does not exist; for safety reasons we assume it's not expired
+            return False
+
+        except Exception as e:
+            # Some error occured; for safety reasons we assume it's not expired
+            self._logger.warning(f"Error checking lock expiration for {lock_file_name}: {e}")
+            return False
 
     def release_lock(self, remote_file_path: str, lock_id: str):
         lock_file_name = self._get_lock_file_name(remote_file_path)
