@@ -6,8 +6,7 @@ import boto3
 import botocore.exceptions
 from botocore.config import Config
 
-from . import StorageFileAlreadyExists
-from .exceptions import S3Error, S3BucketNotSpecified, StorageFileNotFoundError
+from .exceptions import S3Error, S3BucketNotSpecified, StorageFileNotFoundError, StorageFileAlreadyExists
 from .storage import Storage
 
 
