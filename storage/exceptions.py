@@ -23,6 +23,13 @@ class StorageFileNotFoundError(StorageError):
             message = f"File {file} not found!"
         super().__init__(message)
 
+class StorageFileAlreadyExists(StorageError):
+    """Raised when a file already exists in storage."""
+    def __init__(self, file: Path | str | None = None):
+        message = "File already exists!"
+        if file is not None:
+            message = f"File {file} already exists!"
+
 
 class S3Error(StorageError):
     """Base exception for S3-related errors."""

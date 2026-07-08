@@ -7,8 +7,9 @@ import uuid
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
 from pathlib import Path
+import os
 
-from .exceptions import StorageCannotAcquireLock, StorageFileNotFoundError
+from .exceptions import StorageCannotAcquireLock, StorageFileNotFoundError, StorageFileAlreadyExists
 
 
 class Storage(ABC):
@@ -41,6 +42,10 @@ class Storage(ABC):
     # ---------------- LOW-LEVEL IMPLEMENTATION ----------------
     @abstractmethod
     def _upload(self, remote_file_path: str, local_file_path: Path | str):
+        ...
+
+    @abstractmethod
+    def _upload_atomic(self, remote_file_path: str, local_file_path: Path | str):
         ...
 
     @abstractmethod
@@ -86,44 +91,67 @@ class Storage(ABC):
             path.unlink(missing_ok=True)
 
     # ---------------- ACQUIRE / RELEASE LOCK ----------------
-    def acquire_lock(self, remote_file_path: str, max_retries: int = 10, ttl: int = 120) -> str:
+    def acquire_lock(self, remote_file_path: str, max_retries: int = 3, ttl: int = 120) -> str:
         lock_file_name = self._get_lock_file_name(remote_file_path)
         lock_id = str(uuid.uuid4())
 
-        for _ in range(max_retries):
-            if not self.exists(lock_file_name):
-                self._logger.info(f"Creating lock for {remote_file_path}")
-                with self._temp_path(".json") as tmp_lock_path:
-                    with open(tmp_lock_path, "w", encoding="utf-8") as f:
-                        json.dump({"uuid": lock_id, "timestamp": time.time(), "ttl": ttl}, f, indent=2)
-                    self.upload(lock_file_name, tmp_lock_path)
+        for attempt in range(max_retries):
+            lock_data = {
+                "uuid": lock_id,
+                "timestamp": time.time(),
+                "ttl": ttl,
+                "pid": os.getpid()
+            }
 
-                # verify lock
-                with self._temp_path(".json") as verify_path:
-                    self.download(lock_file_name, verify_path)
-                    with open(verify_path, encoding="utf-8") as f:
-                        content = json.load(f)
-                    if content.get("uuid") == lock_id:
-                        return lock_id
-            else:
-                # check for expired lock
-                with self._temp_path(".json") as verify_path:
-                    self.download(lock_file_name, verify_path)
-                    with open(verify_path, encoding="utf-8") as f:
-                        content = json.load(f)
-                    if (time.time() - content.get("timestamp", 0)) > content.get("ttl", ttl):
-                        self._logger.info(f"Lock '{lock_file_name}' expired, deleting")
-                        self.delete(lock_file_name)
+            with self._temp_path(".json") as tmp_lock_path:
+                with open(tmp_lock_path, "w", encoding="utf-8") as f:
+                    json.dump(lock_data, f, indent=2)
 
-            time.sleep(0.5 + random.random())
+                try:
+                    self._upload_atomic(lock_file_name, tmp_lock_path)
+                    self._logger.info(f"Lock acquired for {remote_file_path} (ID: {lock_id})")
+                    return lock_id
+
+                except StorageFileAlreadyExists:
+                    # Try again if failed in case of concurrent lock acquisition
+                    if attempt < max_retries - 1:
+                        delay = 0.1 * (attempt + 1) + random.random()
+                        time.sleep(delay)
+                        continue
+
+                    else:
+                        raise
+
+                except Exception as e:
+                    # Other exceptions (network issues, etc.) should be propagated
+                    if attempt < max_retries - 1:
+                        time.sleep(0.5)
+                        continue
+
+                    raise
 
         raise StorageCannotAcquireLock(file=lock_file_name)
 
     def release_lock(self, remote_file_path: str, lock_id: str):
         lock_file_name = self._get_lock_file_name(remote_file_path)
-        with self._temp_path(".json") as verify_path:
-            self.download(lock_file_name, verify_path)
-            with open(verify_path, encoding="utf-8") as f:
-                content = json.load(f)
-            if content.get("uuid") == lock_id:
-                self.delete(lock_file_name)
+
+        try:
+            with self._temp_path(".json") as verify_path:
+                self.download(lock_file_name, verify_path)
+
+                with open(verify_path, encoding="utf-8") as f:
+                    content = json.load(f)
+
+                if content.get("uuid") == lock_id:
+                    self.delete(lock_file_name)
+
+                else:
+                    self._logger.warning(f"Lock UUID mismatch for {lock_file_name}. Ignoring release.")
+
+        except StorageFileNotFoundError:
+            # Lock does not exist anymore (expired, removed by another process...)
+            self._logger.debug(f"Lock file {lock_file_name} not found during release.")
+
+        except Exception as e:
+            self._logger.error(f"Error releasing lock {lock_file_name}: {e}")
+            raise
